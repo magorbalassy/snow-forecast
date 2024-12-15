@@ -7,8 +7,6 @@ A tool to scrape snow forecast data and feed data to Elasticsearch or other tool
 A class to scrape data from snow-forecast.com.  
 Uses a logger named `snow_forecast_logger`.  
 
-Sure, here is a description of the `SnowForecast` class that you can use in your `README.md`:
-
 ### SnowForecast Class
 
 The `SnowForecast` class is designed to fetch and parse weather forecast data from the website [snow-forecast.com](https://www.snow-forecast.com). It provides methods to retrieve information about countries, resorts, and detailed weather forecasts for specific resorts. The class uses the `requests` library to make HTTP requests and `BeautifulSoup` from the `bs4` library to parse HTML content.
