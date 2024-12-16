@@ -20,6 +20,7 @@ class Resort:
     country: str
     url: str
     data_url: str
+    geo: Optional[Dict[str, float]]  # Added geo field
 
 @dataclass
 class ForecastData:
@@ -28,7 +29,7 @@ class ForecastData:
     snow: Optional[str]
     freezing_level: Optional[str]
     humidity: Optional[str]
-    wind: Optional[str]  # Add wind field
+    wind: Optional[str]
 
 class ResortRepository:
     """Handles loading and storing resort configurations"""
@@ -72,7 +73,8 @@ class ResortRepository:
                     name=r['name'],
                     country=country,
                     url=r['url'],
-                    data_url=r['data_url']
+                    data_url=r['data_url'],
+                    geo=snow_forecast.get_resort_coordinates(r['url'])
                 ) 
                 for r in resorts
             ]
@@ -109,7 +111,7 @@ class ForecastService:
                                 snow=data['snow'],
                                 freezing_level=data['freezing_level'],
                                 humidity=data['humidity'],
-                                wind=data['wind']  # Add wind to ForecastData object creation
+                                wind=data['wind']
                             )
                             for data in forecast_data_dicts
                         ]
@@ -124,7 +126,9 @@ if __name__ == '__main__':
     # SnowForecast example usage
     snow_forecast = SnowForecast()
     print(snow_forecast.forecast_for_resort('/resorts/Hoch-Ybrig/6day/mid'))
-    print(snow_forecast.forecast_for_resort('/resorts/Engelberg/6day/mid'))
+    
+    # Example resort coordinates
+    print(snow_forecast.get_resort_coordinates('/resorts/Hoch-Ybrig/'))
     
     # Example usage
     service = ForecastService()
@@ -140,5 +144,5 @@ if __name__ == '__main__':
                 f"Snow: {period.snow}, "
                 f"Freezing: {period.freezing_level}, "
                 f"Humidity: {period.humidity}, "
-                f"Wind: {period.wind}"  # Add wind to print statement
+                f"Wind: {period.wind}"
             )
