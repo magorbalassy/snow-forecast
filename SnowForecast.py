@@ -7,7 +7,7 @@ import requests
 logger = logging.getLogger('snow_forecast_logger')
 
 class SnowForecast:
-    """Handles fetching forecast data from the website snow-forecast.com"""
+    """Handles only fetching forecast data from the website snow-forecast.com"""
     def __init__(self):
         self.base_url = "https://www.snow-forecast.com"
         self.headers = {'User-Agent': 'Mozilla/5.0'}
@@ -60,6 +60,63 @@ class SnowForecast:
 
         return resorts
 
+    # Method to get the coordinates of a resort
+    def get_resort_coordinates(self, resort_url):
+        """
+        Get the resort coordinates.
+
+        Need to load the resort url page which is passed as an argument,
+        and return the geo object with the lat, lon fields.
+        If the lat is S (south) then the coordinate should reflect that.
+
+        Example div structure from the HTML page:
+
+        <div class="location-subnavigation__location-title-text">Arosa
+            <div class="is-block has-text-xs">Lat Long: 
+                <span class="latitude" title="46.78">
+                    46.78&deg; N
+                </span>
+                <span class="longitude" title="9.68">
+                    9.68&deg; E
+                </span>
+            </div>
+        </div>
+        """
+        # Load the resort URL page
+        response = requests.get(self.base_url + resort_url)
+        response.raise_for_status()
+        soup = bs4.BeautifulSoup(response.content, 'html.parser')
+
+        # Find the div containing the coordinates
+        coord_div = soup.find('div', class_='location-subnavigation__location-title-text')
+        if coord_div:
+            coord_info = coord_div.find('div', class_='is-block has-text-xs')
+            if coord_info:
+                # Extract latitude
+                lat_span = coord_info.find('span', class_='latitude')
+                # Extract longitude
+                lon_span = coord_info.find('span', class_='longitude')
+                if lat_span and lon_span:
+                    lat_text = lat_span.get_text(strip=True)
+                    lon_text = lon_span.get_text(strip=True)
+
+                    # Process latitude
+                    lat_value_str, lat_direction = lat_text.replace('°', '').split()
+                    lat_value = float(lat_value_str)
+                    if lat_direction.upper() == 'S':
+                        lat_value = -lat_value
+
+                    # Process longitude
+                    lon_value_str, lon_direction = lon_text.replace('°', '').split()
+                    lon_value = float(lon_value_str)
+                    if lon_direction.upper() == 'W':
+                        lon_value = -lon_value
+
+                    # Return the geo object
+                    geo = {'lat': lat_value, 'lon': lon_value}
+                    return geo
+        return None
+    
     def _extract_resorts_from_page(self, soup):
         resorts = []
         resort_rows = soup.find_all('tr', class_='digest-row')
