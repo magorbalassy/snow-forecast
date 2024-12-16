@@ -15,9 +15,9 @@ The `SnowForecast` class is designed to fetch and parse weather forecast data fr
 
 - **`get_countries()`**: Fetches a list of countries available on the snow-forecast.com website. It returns a list of dictionaries, each containing the name and URL of a country.
 
-- **`get_resorts_with_tabs(country)`**: Retrieves a list of resorts for a given country. It handles multiple tabs on the country page to ensure all resorts are fetched. The method returns a list of dictionaries, each containing the name, data URL, and URL of a resort.
-
 - **`forecast_for_resort(resort_url)`**: Fetches the 6-day weather forecast for a specific resort. It extracts data such as snow forecast, freezing level, humidity, and wind from the forecast table. The method returns a list of dictionaries, each containing the date, time, and weather data for a specific time period.
+
+- **`get_resorts_with_tabs(country)`**: Retrieves a list of resorts for a given country. It handles multiple tabs on the country page to ensure all resorts are fetched. The method returns a list of dictionaries, each containing the name, data URL, and URL of a resort.
 
 #### Example Usage
 
