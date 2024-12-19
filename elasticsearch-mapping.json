@@ -1,0 +1,64 @@
+{
+  "mappings": {
+    "runtime": {
+      "heatmap_label": {
+        "type": "keyword",
+        "script": {
+          "source": "emit(doc['name'].value + '\n' + doc['total_snow_cm'].value + ' cm')"
+        }
+      }
+    },
+    "properties": {
+      "@timestamp": {
+        "type": "date"
+      },
+      "name": {
+        "type": "keyword"
+      },
+      "country": {
+        "type": "keyword"
+      },
+      "geo": {
+        "type": "geo_point"
+      },
+      "total_snow_cm": {
+        "type": "float"
+      },
+      "forecasts": {
+        "type": "nested",
+        "properties": {
+          "date": {
+            "type": "date",
+            "format": "yyyy-MM-dd"
+          },
+          "time": {
+            "type": "keyword"
+          },
+          "snow": {
+            "type": "float"
+          },
+          "freezing_level": {
+            "type": "integer",
+            "ignore_malformed": true
+          },
+          "humidity": {
+            "type": "integer",
+            "ignore_malformed": true
+          },
+          "wind": {
+            "type": "text",
+            "fields": {
+              "keyword": {
+                "type": "keyword"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 1
+  }
+}
