@@ -1,9 +1,15 @@
+import json
 from dataclasses import dataclass
 from typing import List, Dict, Optional
 from SnowForecast import SnowForecast
 import logging
 import os
 import yaml
+from datetime import datetime
+from elasticsearch import Elasticsearch
+from elasticsearch.helpers import bulk
+import ssl
+import certifi
 
 # Configure custom logger
 logger = logging.getLogger('snow_forecast_logger')
@@ -18,131 +24,210 @@ logger.info('==== Starting new run ====')
 class Resort:
     name: str
     country: str
-    url: str
-    data_url: str
-    geo: Optional[Dict[str, float]]  # Added geo field
+    url: Optional[str] = None
+    data_url: Optional[str] = None
+    geo: Optional[Dict[str, float]] = None
 
 @dataclass
-class ForecastData:
-    date: str
-    time: str
-    snow: Optional[str]
-    freezing_level: Optional[str]
-    humidity: Optional[str]
-    wind: Optional[str]
+class SnowForecastDocument:
+    """Represents a snow forecast document for Elasticsearch"""
+    name: str
+    country: str
+    geo: Dict[str, float]
+    forecasts: List[Dict[str, str]]  # List of daily forecasts with date, time, snow, freezing_level, humidity, wind
+    total_snow_cm: float  # Sum of all snow forecasts
+    timestamp: str  # ISO8601 date when the forecast was fetched
 
-class ResortRepository:
-    """Handles loading and storing resort configurations"""
-    def __init__(self, config_file: str = 'resorts.yaml'):
-        self.config_file = config_file
-        self.user_resorts: Dict[str, List[str]] = {}  # country -> list of resort names
-        self.available_resorts: Dict[str, List[Resort]] = {}  # country -> list of resort details
-
-    def load_user_resorts(self) -> Dict[str, List[str]]:
-        """Load just the resort names per country that user wants to monitor"""
-        if not os.path.exists(self.config_file):
-            raise FileNotFoundError(f"Configuration file '{self.config_file}' not found")
-        
-        with open(self.config_file) as file:
-            self.user_resorts = yaml.load(file, Loader=yaml.FullLoader)
-        return self.user_resorts
-
-    def get_matching_resort(self, country: str, resort_name: str) -> Optional[Resort]:
-        """Find matching resort from available resorts based on name"""
-        if country not in self.available_resorts:
-            return None
-            
-        # Try to find exact match first
-        for resort in self.available_resorts[country]:
-            if resort.name.lower() == resort_name.lower():
-                return resort
-                
-        # Try fuzzy matching if no exact match found
-        for resort in self.available_resorts[country]:
-            if resort_name.lower() in resort.name.lower():
-                return resort
-                
-        return None
-
-    def update_available_resorts(self, snow_forecast: 'SnowForecast'):
-        """Fetch all available resorts from snow-forecast.com"""
-        for country in self.user_resorts.keys():
-            resorts = snow_forecast.get_resorts_with_tabs(country)
-            self.available_resorts[country] = [
-                Resort(
-                    name=r['name'],
-                    country=country,
-                    url=r['url'],
-                    data_url=r['data_url'],
-                    geo=snow_forecast.get_resort_coordinates(r['url'])
-                ) 
-                for r in resorts
-            ]
-
-class ForecastService:
-    """Coordinates between repositories and data fetching"""
-    def __init__(self):
-        self.repository = ResortRepository()
-        self.snow_forecast = SnowForecast()
-        
-    def get_forecasts_for_user_resorts(self) -> Dict[str, List[ForecastData]]:
-        """Get forecasts for all user-configured resorts"""
-        forecasts = {}
-        
-        # Load user's desired resorts
-        user_resorts = self.repository.load_user_resorts()
-        
-        # Fetch available resorts from snow-forecast.com
-        self.repository.update_available_resorts(self.snow_forecast)
-        
-        # Get forecasts for matching resorts
-        for country, resort_names in user_resorts.items():
+def load_user_resorts(yaml_path: str) -> List[Resort]:
+    with open(yaml_path, 'r') as file:
+        yaml_data = yaml.safe_load(file)
+    
+    resorts = []
+    for country, resort_names in yaml_data.items():
+        if resort_names:  # Check if the list is not None
             for resort_name in resort_names:
-                resort = self.repository.get_matching_resort(country, resort_name)
-                if resort:
-                    logger.info(f"Found matching resort for {resort_name}: {resort.name} ({resort.url} , {resort.data_url})")
-                    forecast_data_dicts = self.snow_forecast.forecast_for_resort(resort.data_url)
-                    if forecast_data_dicts:
-                        # Convert dictionaries to ForecastData objects
-                        forecast_data_objects = [
-                            ForecastData(
-                                date=data['date'],
-                                time=data['time'],
-                                snow=data['snow'],
-                                freezing_level=data['freezing_level'],
-                                humidity=data['humidity'],
-                                wind=data['wind']
-                            )
-                            for data in forecast_data_dicts
-                        ]
-                        forecasts[resort.name] = forecast_data_objects
-                else:
-                    logger.warning(f"No matching resort found for {resort_name} in {country}")
-                    
-        return forecasts
+                resorts.append(Resort(name=resort_name, country=country))
+    return resorts
 
+def load_snow_forecast_resorts(countries: List[str], force_load: bool = False) -> Dict[str, List[Resort]]:
+    cache_file = 'snow_forecast_resorts.ndjson'
+    
+    if not force_load and os.path.exists(cache_file):
+        resorts_by_country = {}
+        with open(cache_file, 'r') as f:
+            for line in f:
+                data = json.loads(line)
+                country = data['country']
+                if country not in resorts_by_country:
+                    resorts_by_country[country] = []
+                # Convert cached data directly to Resort object
+                resort = Resort(**data['resort_data'])
+                resorts_by_country[country].append(resort)
+        return resorts_by_country
 
-if __name__ == '__main__':
-    # SnowForecast example usage
-    snow_forecast = SnowForecast()
-    print(snow_forecast.forecast_for_resort('/resorts/Hoch-Ybrig/6day/mid'))
+    sf = SnowForecast()
+    resorts_by_country = {}
     
-    # Example resort coordinates
-    print(snow_forecast.get_resort_coordinates('/resorts/Hoch-Ybrig/'))
-    
-    # Example usage
-    service = ForecastService()
-    all_forecasts = service.get_forecasts_for_user_resorts()
-    print(all_forecasts)
-    
-    # Print forecasts by resort
-    for resort_name, forecast_periods in all_forecasts.items():
-        print(f"\nForecast for {resort_name}:")
-        for period in forecast_periods:
-            print(
-                f"{period.date} {period.time}: "
-                f"Snow: {period.snow}, "
-                f"Freezing: {period.freezing_level}, "
-                f"Humidity: {period.humidity}, "
-                f"Wind: {period.wind}"
+    for country in countries:
+        logger.info(f"Loading resorts for {country}")
+        raw_resorts = sf.get_resorts_with_tabs(country.lower())
+        resorts = []
+        for raw_resort in raw_resorts:            
+            resort = Resort(
+                name=raw_resort['name'],
+                country=country,
+                url=raw_resort['url'],
+                data_url=raw_resort['data_url']
             )
+            resorts.append(resort)
+        resorts_by_country[country] = resorts
+        
+        # Save complete Resort objects to NDJSON file
+        with open(cache_file, 'a') as f:
+            for resort in resorts:
+                resort_dict = {
+                    'country': country,
+                    'resort_data': {
+                        'name': resort.name,
+                        'country': resort.country,
+                        'url': resort.url,
+                        'data_url': resort.data_url
+                    }
+                }
+                json.dump(resort_dict, f)
+                f.write('\n')
+    
+    return resorts_by_country
+
+def update_user_resorts(user_resorts: List[Resort], snow_forecast_resorts: Dict[str, List[Resort]]):
+    for user_resort in user_resorts:
+        country_resorts = snow_forecast_resorts.get(user_resort.country, [])
+        for sf_resort in country_resorts:
+            if user_resort.name.lower() in sf_resort.name.lower():
+                user_resort.url = sf_resort.url
+                user_resort.data_url = sf_resort.data_url
+                break
+
+def create_snow_forecast_document(resort: Resort, forecast_data: List[Dict]) -> SnowForecastDocument:
+    """Create a SnowForecastDocument from resort and its forecast data"""
+    # Calculate total snow from forecast data
+    total_snow = sum(
+        float(point['snow'].replace('cm', '0')) 
+        for point in forecast_data 
+        if point.get('snow')
+    )
+    
+    return SnowForecastDocument(
+        name=resort.name,
+        country=resort.country,
+        geo=resort.geo or {},
+        forecasts=forecast_data,
+        total_snow_cm=total_snow,
+        timestamp=datetime.utcnow().isoformat()
+    )
+
+def create_es_client():
+    """Create Elasticsearch client with SSL and authentication"""
+    return Elasticsearch(
+        ['https://192.168.10.150:30920'],
+        basic_auth=('elastic', 'ox2UYL4cj90p19q63nm6gA8b'),
+        verify_certs=False,
+        ssl_show_warn=False
+    )
+
+def setup_index(es_client, index_name='snow-forecasts'):
+    """Create or update index with proper mappings"""
+    with open('elasticsearch-mapping.json', 'r') as f:
+        mapping = json.load(f)
+    
+    if not es_client.indices.exists(index=index_name):
+        es_client.indices.create(index=index_name, body=mapping)
+        logger.info(f"Created index {index_name}")
+
+def prepare_documents(elastic_documents, index_name='snow-forecasts'):
+    """Convert documents to Elasticsearch bulk format"""
+    for doc in elastic_documents:
+        # Convert dataclass to dict and ensure all fields are present
+        doc_dict = {
+            '_index': index_name,
+            '_source': {
+                '@timestamp': doc.timestamp,
+                'name': doc.name,
+                'country': doc.country,
+                'geo': doc.geo,
+                'total_snow_cm': doc.total_snow_cm,
+                'forecasts': doc.forecasts
+            }
+        }
+        yield doc_dict
+            
+if __name__ == '__main__':
+    user_resorts_file = 'user_resorts.json'
+    yaml_resorts = load_user_resorts('resorts.yaml')
+    reload_needed = True
+    sf = SnowForecast()
+
+    if os.path.exists(user_resorts_file) and os.path.getsize(user_resorts_file) > 0:
+        # Load existing user resorts from JSON
+        with open(user_resorts_file, 'r') as f:
+            user_resorts_data = json.load(f)
+            loaded_resorts = [Resort(**data) for data in user_resorts_data]
+            
+        # Compare loaded resorts with yaml resorts
+        if len(loaded_resorts) == len(yaml_resorts):
+            yaml_resort_keys = {(r.name, r.country) for r in yaml_resorts}
+            loaded_resort_keys = {(r.name, r.country) for r in loaded_resorts}
+            if yaml_resort_keys == loaded_resort_keys:
+                user_resorts = loaded_resorts
+                reload_needed = False
+                logger.info(f"Loaded {len(user_resorts)} matching resort(s) from {user_resorts_file}")
+    
+    if reload_needed:
+        # Perform the original scraping and data collection
+        user_resorts = yaml_resorts
+        logger.info(f"User resorts: {user_resorts}")
+        unique_countries = list(set(resort.country for resort in user_resorts))
+        snow_forecast_resorts = load_snow_forecast_resorts(unique_countries)
+        logger.debug(f"Snow forecast resorts: {snow_forecast_resorts}")
+        update_user_resorts(user_resorts, snow_forecast_resorts)
+        
+        # Add geo coordinates to user resorts
+        for user_resort in user_resorts:
+            if user_resort.url:
+                user_resort.geo = sf.get_resort_coordinates(user_resort.url)
+                logger.info(f"Added geo coordinates for {user_resort.name}: {user_resort.geo}")
+                
+        # Save the updated resorts
+        with open(user_resorts_file, 'w') as f:
+            json.dump([resort.__dict__ for resort in user_resorts], f, indent=4)
+            
+    # Fetch snow forecast data for each resort
+    logger.info("Fetching snow forecast data for resorts...")
+    elastic_documents = []
+    for resort in user_resorts:
+        if resort.data_url:
+            logger.info(f"Fetching forecast for {resort.name}")
+            forecast_data = sf.forecast_for_resort(resort.data_url)
+            if forecast_data:
+                doc = create_snow_forecast_document(resort, forecast_data)
+                elastic_documents.append(doc)
+                logger.info(f"Successfully created document for {resort.name}")
+            else:
+                logger.error(f"Failed to fetch forecast for {resort.name}")
+    
+    logger.info(f"Created {len(elastic_documents)} documents ready for Elasticsearch")
+    logger.debug('Documents:', elastic_documents)
+    
+    # After creating elastic_documents, send to Elasticsearch
+    try:
+        es = create_es_client()
+        setup_index(es)
+        
+        # Bulk index the documents
+        success, failed = bulk(es, prepare_documents(elastic_documents))
+        logger.info(f"Successfully indexed {success} documents")
+        if failed:
+            logger.error(f"Failed to index {len(failed)} documents")
+            
+    except Exception as e:
+        logger.error(f"Error connecting to Elasticsearch: {str(e)}")
