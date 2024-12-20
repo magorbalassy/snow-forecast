@@ -1,15 +1,13 @@
 import json
-from dataclasses import dataclass
-from typing import List, Dict, Optional
-from SnowForecast import SnowForecast
 import logging
 import os
 import yaml
 from datetime import datetime
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import bulk
-import ssl
-import certifi
+from dataclasses import dataclass
+from typing import List, Dict, Optional
+from SnowForecast import SnowForecast
 
 # Configure custom logger
 logger = logging.getLogger('snow_forecast_logger')
@@ -137,13 +135,19 @@ def create_es_client():
 
 def setup_index(es_client, index_name='snow-forecasts'):
     """Create or update index with proper mappings"""
+    logger.debug(f"Loading Elasticsearch mapping for {index_name}")
     with open('elasticsearch-mapping.json', 'r') as f:
+        logger.debug(f"Loading mapping...")
         mapping = json.load(f)
+        logger.debug(f"Mapping loaded.")
     
+    logger.info(f"Checking if index {index_name} exists...")
     if not es_client.indices.exists(index=index_name):
         es_client.indices.create(index=index_name, body=mapping)
         logger.info(f"Created index {index_name}")
-
+    else:
+        logger.info(f"Index {index_name} already exists")
+        
 def prepare_documents(elastic_documents, index_name='snow-forecasts'):
     """Convert documents to Elasticsearch bulk format"""
     for doc in elastic_documents:
@@ -218,6 +222,15 @@ if __name__ == '__main__':
     logger.info(f"Created {len(elastic_documents)} documents ready for Elasticsearch")
     logger.debug('Documents:', elastic_documents)
     
+    with open('sample.json', 'w') as f:
+        for doc in elastic_documents:
+            # Write the action line
+            action = {"index": {"_index": "snow-forecasts"}}
+            json.dump(action, f)
+            f.write('\n')
+            # Write the document line
+            json.dump(doc.__dict__, f)
+            f.write('\n')
     # After creating elastic_documents, send to Elasticsearch
     try:
         es = create_es_client()
