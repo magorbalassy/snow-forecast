@@ -1,60 +1,76 @@
 {
   "mappings": {
-    "runtime": {
-      "heatmap_label": {
-        "type": "keyword",
-        "script": {
-          "source": "emit(doc['name'].value + '\n' + doc['total_snow_cm'].value + ' cm')"
-        }
-      }
-    },
-    "properties": {
-      "@timestamp": {
-        "type": "date"
-      },
-      "name": {
-        "type": "keyword"
-      },
-      "country": {
-        "type": "keyword"
-      },
-      "geo": {
-        "type": "geo_point"
-      },
-      "total_snow_cm": {
-        "type": "float"
-      },
-      "forecasts": {
-        "type": "nested",
+        "runtime": {
+          "heatmap_label": {
+            "type": "keyword",
+            "script": {
+              "source": "emit(doc['name'].value + doc['total_snow_cm'].value + ' cm')",
+              "lang": "painless"
+            }
+          }
+        },
         "properties": {
-          "date": {
-            "type": "date",
-            "format": "yyyy-MM-dd"
+          "@timestamp": {
+            "type": "date"
           },
-          "time": {
+          "country": {
             "type": "keyword"
           },
-          "snow": {
+          "forecasts": {
+            "type": "nested",
+            "properties": {
+              "date": {
+                "type": "date",
+                "format": "yyyy-MM-dd"
+              },
+              "freezing_level": {
+                "type": "integer",
+                "ignore_malformed": true
+              },
+              "humidity": {
+                "type": "integer",
+                "ignore_malformed": true
+              },
+              "snow": {
+                "type": "float"
+              },
+              "time": {
+                "type": "keyword"
+              },
+              "wind": {
+                "type": "text",
+                "fields": {
+                  "keyword": {
+                    "type": "keyword"
+                  }
+                }
+              }
+            }
+          },
+          "geo": {
+            "type": "geo_point"
+          },
+          "name": {
+            "type": "keyword"
+          },
+          "total_snow_cm": {
             "type": "float"
           },
-          "freezing_level": {
-            "type": "integer",
-            "ignore_malformed": true
-          },
-          "humidity": {
-            "type": "integer",
-            "ignore_malformed": true
-          },
-          "wind": {
-            "type": "text",
-            "fields": {
-              "keyword": {
-                "type": "keyword"
+        "forecasts_flat": {
+          "type": "object",
+          "dynamic": true,
+          "properties": {
+            "*": {
+              "type": "object",
+              "properties": {
+                "snow": { "type": "float" },
+                "freezing_level": { "type": "integer" },
+                "humidity": { "type": "integer" },
+                "wind": { "type": "keyword" }
               }
             }
           }
         }
-      }
     }
   },
   "settings": {
