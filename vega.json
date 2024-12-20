@@ -1,161 +1,172 @@
 {
-    "$schema": "https://vega.github.io/schema/vega/v5.json",
-    "width": 1200,
-    "height": {"signal": "data('unique_resorts').length * 30 + 50"},
-    "padding": {"top": 50, "left": 150, "right": 30, "bottom": 30},
-    "data": [
-      {
-        "name": "rawData",
-        "url": {
-          "index": "snow-forecasts",
-          "body": {
-            "size": 1000,
-            "_source": ["name", "forecasts"],
-            "query": {
-              "match_all": {}
-            }
-          }
-        },
-        "format": {"property": "hits.hits"}
-      },
-      {
-        "name": "source",
-        "source": "rawData",
-        "transform": [
-          {
-            "type": "flatten",
-            "fields": ["_source.forecasts"],
-            "as": ["forecast"]
-          },
-          {
-            "type": "formula",
-            "expr": "datum._source.name",
-            "as": "resort_name"
-          },
-          {
-            "type": "formula",
-            "expr": "datum.forecast.date + ' ' + datum.forecast.time",
-            "as": "datetime"
-          },
-          {
-            "type": "formula",
-            "expr": "replace(datum.forecast.snow, 'cm', '')",
-            "as": "snow_value"
-          }
+  "$schema": "https://vega.github.io/schema/vega/v5.json",
+
+  "padding": {"top": 50, "left": 150, "right": 30, "bottom": 30},
+
+  "data": [
+    {
+      "name": "rawData",
+      "url": {
+        "index": "snow-forecasts",
+        "body": {
+          "size": 1000,
+          "_source": ["name", "forecasts"],
+          "query": {
+            "bool":{
+              "must": [
+                "%dashboard_context-must_clause%",
+                 {
+                  "range": {
+                    "@timestamp": {
+                      "%timefilter%": true
+                      }
+                    }
+                  }
         ]
-      },
-      {
-        "name": "unique_resorts",
-        "source": "source",
-        "transform": [
-          {
-            "type": "aggregate",
-            "groupby": ["resort_name"]
-          }
-        ]
-      },
-      {
-        "name": "unique_datetimes",
-        "source": "source",
-        "transform": [
-          {
-            "type": "aggregate",
-            "groupby": ["datetime"]
-          },
-          {
-            "type": "collect",
-            "sort": {"field": "datetime"}
-          }
-        ]
-      }
-    ],
-    "scales": [
-      {
-        "name": "y",
-        "type": "band",
-        "range": "height",
-        "domain": {
-          "data": "unique_resorts",
-          "field": "resort_name",
-          "sort": true
-        },
-        "padding": 0.2
-      },
-      {
-        "name": "x",
-        "type": "band",
-        "range": "width",
-        "domain": {
-          "data": "unique_datetimes",
-          "field": "datetime",
-          "sort": true
-        },
-        "padding": 0.1
-      },
-      {
-        "name": "color",
-        "type": "linear",
-        "domain": [0, 50],
-        "range": ["#eef6ff", "#1f77b4"],
-        "zero": true
-      }
-    ],
-    "axes": [
-      {
-        "orient": "left",
-        "scale": "y",
-        "title": "Resorts",
-        "labelLimit": 140,
-        "labelFontSize": 11
-      },
-      {
-        "orient": "top",
-        "scale": "x",
-        "title": "Forecast Time",
-        "labelAngle": -45,
-        "labelAlign": "left",
-        "encode": {
-          "labels": {
-            "update": {
-              "text": {"signal": "datum.value"}
             }
           }
         }
-      }
-    ],
-    "marks": [
-      {
-        "type": "rect",
-        "from": {"data": "source"},
-        "encode": {
-          "enter": {
-            "y": {"scale": "y", "field": "resort_name"},
-            "height": {"scale": "y", "band": 1},
-            "x": {"scale": "x", "field": "datetime"},
-            "width": {"scale": "x", "band": 1},
-            "tooltip": {
-              "signal": "{'Resort': datum.resort_name, 'DateTime': datum.datetime, 'Snow': datum.forecast.snow, 'Freezing Level': datum.forecast.freezing_level + 'm', 'Humidity': datum.forecast.humidity + '%', 'Wind': datum.forecast.wind}"
-            }
-          },
+      },
+      "format": {"property": "hits.hits"}
+    },
+    {
+      "name": "source",
+      "source": "rawData",
+      "transform": [
+        {
+          "type": "flatten",
+          "fields": ["_source.forecasts"],
+          "as": ["forecast"]
+        },
+        {
+          "type": "formula",
+          "expr": "datum._source.name",
+          "as": "resort_name"
+        },
+        {
+          "type": "formula",
+          "expr": "datum.forecast.date + ' ' + datum.forecast.time",
+          "as": "datetime"
+        },
+        {
+          "type": "formula",
+          "expr": "replace(datum.forecast.snow, 'cm', '')",
+          "as": "snow_value"
+        }
+      ]
+    },
+    {
+      "name": "unique_resorts",
+      "source": "source",
+      "transform": [
+        {
+          "type": "aggregate",
+          "groupby": ["resort_name"]
+        }
+      ]
+    },
+    {
+      "name": "unique_datetimes",
+      "source": "source",
+      "transform": [
+        {
+          "type": "aggregate",
+          "groupby": ["datetime"]
+        },
+        {
+          "type": "collect",
+          "sort": {"field": "datetime"}
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "y",
+      "type": "band",
+      "range": "height",
+      "domain": {
+        "data": "unique_resorts",
+        "field": "resort_name",
+        "sort": true
+      },
+      "padding": 0.2
+    },
+    {
+      "name": "x",
+      "type": "band",
+      "range": "width",
+      "domain": {
+        "data": "unique_datetimes",
+        "field": "datetime",
+        "sort": true
+      },
+      "padding": 0.1
+    },
+    {
+      "name": "color",
+      "type": "linear",
+      "domain": [0, 50],
+      "range": ["#eef6ff", "#1f77b4"],
+      "zero": true
+    }
+  ],
+  "axes": [
+    {
+      "orient": "left",
+      "scale": "y",
+      "title": "Resorts",
+      "labelLimit": 140,
+      "labelFontSize": 11
+    },
+    {
+      "orient": "top",
+      "scale": "x",
+      "title": "Forecast Time",
+      "labelAngle": -45,
+      "labelAlign": "left",
+      "encode": {
+        "labels": {
           "update": {
-            "fill": {"scale": "color", "field": "snow_value"}
-          }
-        }
-      },
-      {
-        "type": "text",
-        "from": {"data": "source"},
-        "encode": {
-          "enter": {
-            "y": {"scale": "y", "field": "resort_name", "band": 0.5},
-            "x": {"scale": "x", "field": "datetime", "band": 0.5},
-            "align": {"value": "center"},
-            "baseline": {"value": "middle"},
-            "fontSize": {"value": 11},
-            "text": {"field": "forecast.snow"},
-            "fill": {"value": "black"}
+            "text": {"signal": "datum.value"}
           }
         }
       }
-    ]
-  }
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "source"},
+      "encode": {
+        "enter": {
+          "y": {"scale": "y", "field": "resort_name"},
+          "height": {"scale": "y", "band": 1},
+          "x": {"scale": "x", "field": "datetime"},
+          "width": {"scale": "x", "band": 1},
+          "tooltip": {
+            "signal": "{'Resort': datum.resort_name, 'DateTime': datum.datetime, 'Snow': datum.forecast.snow, 'Freezing Level': datum.forecast.freezing_level + 'm', 'Humidity': datum.forecast.humidity + '%', 'Wind': datum.forecast.wind}"
+          }
+        },
+        "update": {
+          "fill": {"scale": "color", "field": "snow_value"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "source"},
+      "encode": {
+        "enter": {
+          "y": {"scale": "y", "field": "resort_name", "band": 0.5},
+          "x": {"scale": "x", "field": "datetime", "band": 0.5},
+          "align": {"value": "center"},
+          "baseline": {"value": "middle"},
+          "fontSize": {"value": 11},
+          "text": {"field": "forecast.snow"},
+          "fill": {"value": "black"}
+        }
+      }
+    }
+  ]
+}
