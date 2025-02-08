@@ -1,0 +1,77 @@
+{
+  "priority": 200,
+  "template": {
+    "settings": {
+      "index": {
+        "number_of_shards": "1",
+        "number_of_replicas": "1"
+      }
+    },
+    "mappings": {
+      "runtime": {
+        "heatmap_label": {
+          "type": "keyword",
+          "script": {
+            "source": """emit(doc['name'].value + '
+' + doc['total_snow_cm'].value + ' cm')""",
+            "lang": "painless"
+          }
+        }
+      },
+      "dynamic_templates": [],
+      "properties": {
+        "geo": {
+          "type": "geo_point"
+        },
+        "country": {
+          "type": "keyword"
+        },
+        "@timestamp": {
+          "type": "date"
+        },
+        "total_snow_cm": {
+          "type": "float"
+        },
+        "name": {
+          "type": "keyword"
+        },
+        "forecasts": {
+          "type": "nested",
+          "properties": {
+            "date": {
+              "format": "yyyy-MM-dd",
+              "type": "date"
+            },
+            "freezing_level": {
+              "ignore_malformed": true,
+              "type": "integer"
+            },
+            "snow": {
+              "type": "float"
+            },
+            "humidity": {
+              "ignore_malformed": true,
+              "type": "integer"
+            },
+            "time": {
+              "type": "keyword"
+            },
+            "wind": {
+              "type": "text",
+              "fields": {
+                "keyword": {
+                  "type": "keyword"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "index_patterns": [
+    "snow-forecast*"
+  ],
+  "composed_of": [],
+  "ignore_missing_component_templates": []
+}
