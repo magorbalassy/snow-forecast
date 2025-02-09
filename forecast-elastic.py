@@ -133,13 +133,13 @@ def create_es_client():
         ssl_show_warn=False
     )
 
-def setup_index(es_client, index_name='snow-forecasts'):
-    """Create or update index with proper mappings"""
-    logger.debug(f"Loading Elasticsearch mapping for {index_name}")
-    with open('elasticsearch-mapping.json', 'r') as f:
-        logger.debug(f"Loading mapping...")
-        mapping = json.load(f)
-        logger.debug(f"Mapping loaded.")
+def setup_index(es_client, index_name='snow-forecast'):
+    """Create or update index with proper template"""
+    logger.debug(f"Loading Elasticsearch index template for {index_name}")
+    with open('snow-forecast.template.json', 'r') as f:
+        logger.debug(f"Loading template...")
+        template = json.load(f)
+        logger.debug(f"Template loaded.")
     
     logger.info(f"Checking if index {index_name} exists...")
     if not es_client.indices.exists(index=index_name):
@@ -148,7 +148,7 @@ def setup_index(es_client, index_name='snow-forecasts'):
     else:
         logger.info(f"Index {index_name} already exists")
         
-def prepare_documents(elastic_documents, index_name='snow-forecasts'):
+def prepare_documents(elastic_documents, index_name='snow-forecast'):
     """Convert documents to Elasticsearch bulk format"""
     for doc in elastic_documents:
         # Convert dataclass to dict and ensure all fields are present
@@ -220,7 +220,8 @@ if __name__ == '__main__':
                 logger.error(f"Failed to fetch forecast for {resort.name}")
     
     logger.info(f"Created {len(elastic_documents)} documents ready for Elasticsearch")
-    logger.debug('Documents:', elastic_documents)
+    for doc in elastic_documents:
+        logger.debug(f"Document: {json.dumps(doc.__dict__)}")
     
     with open('sample.json', 'w') as f:
         for doc in elastic_documents:
@@ -236,11 +237,22 @@ if __name__ == '__main__':
         es = create_es_client()
         setup_index(es)
         
-        # Bulk index the documents
-        success, failed = bulk(es, prepare_documents(elastic_documents))
-        logger.info(f"Successfully indexed {success} documents")
-        if failed:
-            logger.error(f"Failed to index {len(failed)} documents")
+        # Prepare documents first
+        documents = list(prepare_documents(elastic_documents,'snow-forecast'))
+        
+        # Try to bulk index
+        try:
+            success, errors = bulk(es, documents, stats_only=False)
+            logger.info(f"Successfully indexed {success} documents")
+        except Exception as bulk_error:
+            if hasattr(bulk_error, 'errors'):
+                logger.error("Bulk indexing errors:")
+                for error in bulk_error.errors:
+                    if 'index' in error and 'error' in error['index']:
+                        logger.error(f"Document error: {error['index']['error']}")
+                        logger.error(f"Document ID: {error['index']['_id']}")
+                        logger.error(f"Status: {error['index']['status']}")
+            raise
             
     except Exception as e:
-        logger.error(f"Error connecting to Elasticsearch: {str(e)}")
+        logger.error(f"Error connecting to Elasticsearch: {str(e)}", exc_info=True)
