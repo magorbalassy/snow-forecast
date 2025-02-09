@@ -12,8 +12,7 @@
         "heatmap_label": {
           "type": "keyword",
           "script": {
-            "source": """emit(doc['name'].value + '
-' + doc['total_snow_cm'].value + ' cm')""",
+            "source": "emit(doc['name'].value + '\\n' + doc['total_snow_cm'].value + ' cm')",
             "lang": "painless"
           }
         }
