@@ -1,13 +1,13 @@
 {
   "$schema": "https://vega.github.io/schema/vega/v5.json",
 
-  "padding": {"top": 50, "left": 150, "right": 30, "bottom": 30},
+  "padding": {"top": 50, "left": 50, "right": 30, "bottom": 30},
 
   "data": [
     {
       "name": "rawData",
       "url": {
-        "index": "snow-forecasts",
+        "index": "snow-forecast",
         "body": {
           "size": 1000,
           "_source": ["name", "forecasts"],
