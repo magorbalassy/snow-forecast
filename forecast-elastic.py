@@ -16,6 +16,12 @@ handler = logging.StreamHandler()
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
+
+# File handler
+file_handler = logging.FileHandler('snow_forecast.log')
+file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
+file_handler.setFormatter(file_formatter)
+logger.addHandler(file_handler)
 logger.info('==== Starting new run ====')
 
 @dataclass
@@ -210,7 +216,7 @@ if __name__ == '__main__':
     elastic_documents = []
     for resort in user_resorts:
         if resort.data_url:
-            logger.info(f"Fetching forecast for {resort.name}")
+            logger.info(f"Fetching forecast for {resort.name}, data URL: {resort.data_url}")
             forecast_data = sf.forecast_for_resort(resort.data_url)
             if forecast_data:
                 doc = create_snow_forecast_document(resort, forecast_data)
