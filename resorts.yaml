@@ -32,8 +32,16 @@ Austria:
   - Kaprun
   - Montafon
   - Obergurgl
+  - Obertauern
   - Oetz
   - Serfaus
+
+Italy:
+  - Cortina
+  - Livigno
+#   - Madonna di Campiglio
+#   - Cervinia
+#   - Sestriere
 
 # France:
 #   - Chamonix
@@ -42,9 +50,3 @@ Austria:
 #   - Val Thorens
 #   - Tignes
 
-# Italy:
-#   - Cortina d'Ampezzo
-#   - Madonna di Campiglio
-#   - Cervinia
-#   - Sestriere
-#   - Livigno
