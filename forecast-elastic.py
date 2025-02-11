@@ -197,7 +197,7 @@ if __name__ == '__main__':
         user_resorts = yaml_resorts
         logger.info(f"User resorts: {user_resorts}")
         unique_countries = list(set(resort.country for resort in user_resorts))
-        snow_forecast_resorts = load_snow_forecast_resorts(unique_countries)
+        snow_forecast_resorts = load_snow_forecast_resorts(unique_countries, True)
         logger.debug(f"Snow forecast resorts: {snow_forecast_resorts}")
         update_user_resorts(user_resorts, snow_forecast_resorts)
         
