@@ -8,6 +8,8 @@ logger = logging.getLogger('snow_forecast_logger')
 
 class SnowForecast:
     """Handles only fetching forecast data from the website snow-forecast.com"""
+    FORECAST_DAYS = 6
+
     def __init__(self):
         self.base_url = "https://www.snow-forecast.com"
         self.headers = {'User-Agent': 'Mozilla/5.0'}
@@ -87,36 +89,35 @@ class SnowForecast:
         response.raise_for_status()
         soup = bs4.BeautifulSoup(response.content, 'html.parser')
 
-        # Find the div containing the coordinates
-        coord_div = soup.find('div', class_='location-subnavigation__location-title-text')
-        if coord_div:
-            coord_info = coord_div.find('div', class_='is-block has-text-xs')
-            if coord_info:
-                # Extract latitude
-                lat_span = coord_info.find('span', class_='latitude')
-                # Extract longitude
-                lon_span = coord_info.find('span', class_='longitude')
-                if lat_span and lon_span:
-                    lat_text = lat_span.get_text(strip=True)
-                    lon_text = lon_span.get_text(strip=True)
-
-                    # Process latitude
-                    lat_value_str, lat_direction = lat_text.replace('°', '').split()
-                    lat_value = float(lat_value_str)
-                    if lat_direction.upper() == 'S':
-                        lat_value = -lat_value
-
-                    # Process longitude
-                    lon_value_str, lon_direction = lon_text.replace('°', '').split()
-                    lon_value = float(lon_value_str)
-                    if lon_direction.upper() == 'W':
-                        lon_value = -lon_value
-
-                    # Return the geo object
-                    geo = {'lat': lat_value, 'lon': lon_value}
-                    return geo
+        # The wrapper markup changes over time, so look up the spans directly.
+        # The title attribute holds the unsigned value, the text ends with the direction (N/S/E/W).
+        lat_span = soup.find('span', class_='latitude')
+        lon_span = soup.find('span', class_='longitude')
+        if lat_span and lon_span:
+            try:
+                lat_value = float(lat_span['title'])
+                lon_value = float(lon_span['title'])
+            except (KeyError, ValueError):
+                logger.error(f"Could not parse coordinates for {resort_url}")
+                return None
+            if lat_span.get_text(strip=True).upper().endswith('S'):
+                lat_value = -lat_value
+            if lon_span.get_text(strip=True).upper().endswith('W'):
+                lon_value = -lon_value
+            return {'lat': lat_value, 'lon': lon_value}
+        logger.error(f"Coordinates not found for {resort_url}")
         return None
     
+    @staticmethod
+    def _clean_number(text, default=None):
+        """Return text if it is a number, otherwise default (handles '—', '–', '-' and empty cells)."""
+        text = text.strip()
+        try:
+            float(text)
+            return text
+        except ValueError:
+            return default
+
     def _extract_resorts_from_page(self, soup):
         resorts = []
         resort_rows = soup.find_all('tr', class_='digest-row')
@@ -146,6 +147,7 @@ class SnowForecast:
     # Example file is example-forecast.html
     def forecast_for_resort(self, resort_url):
         full_url = f"{self.base_url}{resort_url}"
+        #full_url = full_url.replace('/mid', '/top')  # Ensure we get the top forecast page
         response = requests.get(full_url, headers=self.headers)
         response.raise_for_status()
         html_content = response.text
@@ -208,18 +210,25 @@ class SnowForecast:
 
         # Get the data cells
         snow_data = [td.get_text(strip=True) for td in snow_row.find_all('td')] if snow_row else []
-        # Replace em dash '—' with '0'
-        snow_data = ['0' if cm == '—' else cm for cm in snow_data]
+        # A dash in the snow row means no snow, so it becomes '0'
+        snow_data = [self._clean_number(cm.replace('cm', ''), default='0') for cm in snow_data]
         logger.debug(f"Snow data after cleaning: {snow_data}")
-        
-        freezing_level_data = [td.get_text(strip=True) for td in freezing_level_row.find_all('td')] if freezing_level_row else []
-        humidity_data = [td.get_text(strip=True) for td in humidity_row.find_all('td')] if humidity_row else []
+
+        # A dash in these rows means no data, so it becomes None (0 m / 0 % would be a real reading)
+        freezing_level_data = [self._clean_number(td.get_text(strip=True)) for td in freezing_level_row.find_all('td')] if freezing_level_row else []
+        humidity_data = [self._clean_number(td.get_text(strip=True)) for td in humidity_row.find_all('td')] if humidity_row else []
         wind_data = [td.get_text(strip=True) for td in wind_row.find_all('td')] if wind_row else []  # Add wind data extraction
         logger.debug(f"Wind data: {wind_data}")
 
+        # Some resorts show an extended forecast; keep only the first FORECAST_DAYS days
+        # so every resort covers the same period
+        kept_dates = sorted({d for d in dates if d})[:self.FORECAST_DAYS]
+        total_periods = len(times)
+        if dates:
+            total_periods = min(total_periods, sum(1 for d in dates if d in kept_dates))
+
         # Combine data into a list of dictionaries
         forecast_data = []
-        total_periods = len(times)
         for i in range(total_periods):
             day_forecast = {
                 'date': dates[i] if i < len(dates) else None,

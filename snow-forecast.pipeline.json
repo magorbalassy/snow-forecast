@@ -1,0 +1,11 @@
+{
+  "description": "Pipeline to flatten forecast data",
+  "processors": [
+    {
+      "script": {
+        "lang": "painless",
+        "source": "def flat = [:];\nfor (def forecast : ctx.forecasts) {\n  def key = forecast.date + ' ' + forecast.time;\n  def snow = 0.0f;\n  def freezing = null;\n  def humidity = null;\n  try { if (forecast.snow != null) { snow = Float.parseFloat(forecast.snow.replace('cm', '').trim()); } } catch (NumberFormatException e) {}\n  try { if (forecast.freezing_level != null) { freezing = Integer.parseInt(forecast.freezing_level.trim()); } } catch (NumberFormatException e) {}\n  try { if (forecast.humidity != null) { humidity = Integer.parseInt(forecast.humidity.trim()); } } catch (NumberFormatException e) {}\n  flat[key] = [\n    'snow': snow,\n    'freezing_level': freezing,\n    'humidity': humidity,\n    'wind': forecast.wind\n  ];\n}\nctx.forecasts_flat = flat;\n"
+      }
+    }
+  ]
+}

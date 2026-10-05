@@ -24,6 +24,9 @@ file_handler.setFormatter(file_formatter)
 logger.addHandler(file_handler)
 logger.info('==== Starting new run ====')
 
+# Mountain levels fetched for every resort (snow-forecast.com URL suffixes)
+LEVELS = ['top', 'mid', 'bot']
+
 @dataclass
 class Resort:
     name: str
@@ -38,6 +41,7 @@ class SnowForecastDocument:
     name: str
     country: str
     geo: Dict[str, float]
+    level: str  # Mountain level of the forecast: top, mid or bot
     forecasts: List[Dict[str, str]]  # List of daily forecasts with date, time, snow, freezing_level, humidity, wind
     total_snow_cm: float  # Sum of all snow forecasts
     timestamp: str  # ISO8601 date when the forecast was fetched
@@ -112,11 +116,11 @@ def update_user_resorts(user_resorts: List[Resort], snow_forecast_resorts: Dict[
                 user_resort.data_url = sf_resort.data_url
                 break
 
-def create_snow_forecast_document(resort: Resort, forecast_data: List[Dict]) -> SnowForecastDocument:
+def create_snow_forecast_document(resort: Resort, level: str, forecast_data: List[Dict]) -> SnowForecastDocument:
     """Create a SnowForecastDocument from resort and its forecast data"""
     # Calculate total snow from forecast data
     total_snow = sum(
-        float(point['snow'].replace('cm', '0')) 
+        float(point['snow'].replace('cm', ''))
         for point in forecast_data 
         if point.get('snow')
     )
@@ -125,6 +129,7 @@ def create_snow_forecast_document(resort: Resort, forecast_data: List[Dict]) -> 
         name=resort.name,
         country=resort.country,
         geo=resort.geo or {},
+        level=level,
         forecasts=forecast_data,
         total_snow_cm=total_snow,
         timestamp=datetime.utcnow().isoformat()
@@ -132,28 +137,63 @@ def create_snow_forecast_document(resort: Resort, forecast_data: List[Dict]) -> 
 
 def create_es_client():
     """Create Elasticsearch client with SSL and authentication"""
+    password = os.environ.get('ES_PASSWORD')
+    if not password:
+        raise RuntimeError("ES_PASSWORD environment variable is not set")
     return Elasticsearch(
-        ['https://192.168.10.150:30920'],
-        basic_auth=('elastic', 'ox2UYL4cj90p19q63nm6gA8b'),
+        [os.environ.get('ES_URL', 'http://192.168.10.5:9200')],
+        basic_auth=(os.environ.get('ES_USER', 'elastic'), password),
         verify_certs=False,
         ssl_show_warn=False
     )
 
+def setup_pipeline(es_client, pipeline_name='snow-forecast'):
+    """Install the ingest pipeline that flattens forecasts; overwrites any existing version."""
+    logger.info(f"Uploading ingest pipeline {pipeline_name} to Elasticsearch.")
+    try:
+        with open('snow-forecast.pipeline.json', 'r') as f:
+            pipeline = json.load(f)
+        response = es_client.ingest.put_pipeline(id=pipeline_name, **pipeline)
+        logger.info(f"Pipeline upload response: {response}")
+    except Exception as e:
+        logger.error(f"Error uploading pipeline: {str(e)}", exc_info=True)
+
 def setup_index(es_client, index_name='snow-forecast'):
-    """Create or update index with proper template"""
     logger.debug(f"Loading Elasticsearch index template for {index_name}")
+    template = {}
     with open('snow-forecast.template.json', 'r') as f:
-        logger.debug(f"Loading template...")
-        template = json.load(f)
-        logger.debug(f"Template loaded.")
-    
+        logger.debug("Loading template...")
+        try:
+            template = json.load(f)
+            logger.debug("Template loaded.")
+        except Exception as e:
+            logger.error(f"Error loading template: {str(e)}", exc_info=True)
+
+    template_name = 'snow-forecast'
+    logger.info(f"Uploading template {template_name} to Elasticsearch.")
+    try:
+        response = es_client.indices.put_index_template(name=template_name, **template)
+        logger.info(f"Template upload response: {response}")
+    except Exception as e:
+        logger.error(f"Error uploading template: {str(e)}", exc_info=True)
+
+
     logger.info(f"Checking if index {index_name} exists...")
     if not es_client.indices.exists(index=index_name):
-        es_client.indices.create(index=index_name, body=mapping)
-        logger.info(f"Created index {index_name}")
+        try:
+            es_client.indices.create(index=index_name)
+            logger.info(f"Created index {index_name}")
+        except Exception as e:
+            logger.error(f"Error creating index {index_name}: {str(e)}")
     else:
         logger.info(f"Index {index_name} already exists")
-        
+        # Template settings and mappings only apply at index creation, so apply them to existing indices too
+        try:
+            es_client.indices.put_settings(index=index_name, settings={'index.default_pipeline': 'snow-forecast'})
+            es_client.indices.put_mapping(index=index_name, properties={'level': {'type': 'keyword'}})
+        except Exception as e:
+            logger.error(f"Error updating settings/mapping on {index_name}: {str(e)}")
+
 def prepare_documents(elastic_documents, index_name='snow-forecast'):
     """Convert documents to Elasticsearch bulk format"""
     for doc in elastic_documents:
@@ -165,6 +205,7 @@ def prepare_documents(elastic_documents, index_name='snow-forecast'):
                 'name': doc.name,
                 'country': doc.country,
                 'geo': doc.geo,
+                'level': doc.level,
                 'total_snow_cm': doc.total_snow_cm,
                 'forecasts': doc.forecasts
             }
@@ -172,6 +213,11 @@ def prepare_documents(elastic_documents, index_name='snow-forecast'):
         yield doc_dict
             
 if __name__ == '__main__':
+    # Fail before scraping instead of after it
+    if not os.environ.get('ES_PASSWORD'):
+        logger.error("ES_PASSWORD environment variable is not set (optional: ES_URL, ES_USER)")
+        raise SystemExit(1)
+
     user_resorts_file = 'user_resorts.json'
     yaml_resorts = load_user_resorts('resorts.yaml')
     reload_needed = True
@@ -215,15 +261,24 @@ if __name__ == '__main__':
     logger.info("Fetching snow forecast data for resorts...")
     elastic_documents = []
     for resort in user_resorts:
-        if resort.data_url:
-            logger.info(f"Fetching forecast for {resort.name}, data URL: {resort.data_url}")
-            forecast_data = sf.forecast_for_resort(resort.data_url)
+        if not resort.data_url:
+            continue
+        # data_url ends with the level, e.g. /resorts/Arosa/6day/mid
+        base_url = resort.data_url.rsplit('/', 1)[0]
+        for level in LEVELS:
+            level_url = f"{base_url}/{level}"
+            logger.info(f"Fetching {level} forecast for {resort.name}, data URL: {level_url}")
+            try:
+                forecast_data = sf.forecast_for_resort(level_url)
+            except Exception as e:
+                logger.error(f"Failed to fetch {level} forecast for {resort.name}: {str(e)}")
+                continue
             if forecast_data:
-                doc = create_snow_forecast_document(resort, forecast_data)
+                doc = create_snow_forecast_document(resort, level, forecast_data)
                 elastic_documents.append(doc)
-                logger.info(f"Successfully created document for {resort.name}")
+                logger.info(f"Successfully created {level} document for {resort.name}")
             else:
-                logger.error(f"Failed to fetch forecast for {resort.name}")
+                logger.error(f"Failed to fetch {level} forecast for {resort.name}")
     
     logger.info(f"Created {len(elastic_documents)} documents ready for Elasticsearch")
     for doc in elastic_documents:
@@ -241,6 +296,7 @@ if __name__ == '__main__':
     # After creating elastic_documents, send to Elasticsearch
     try:
         es = create_es_client()
+        setup_pipeline(es)
         setup_index(es)
         
         # Prepare documents first

@@ -4,7 +4,8 @@
     "settings": {
       "index": {
         "number_of_shards": "1",
-        "number_of_replicas": "1"
+        "number_of_replicas": "1",
+        "default_pipeline": "snow-forecast"
       }
     },
     "mappings": {
@@ -12,7 +13,7 @@
         "heatmap_label": {
           "type": "keyword",
           "script": {
-            "source": "emit(doc['name'].value + '\\n' + doc['total_snow_cm'].value + ' cm')",
+            "source": "emit(doc['name'].value + '\n' + doc['total_snow_cm'].value + ' cm')",
             "lang": "painless"
           }
         }
@@ -32,6 +33,9 @@
           "type": "float"
         },
         "name": {
+          "type": "keyword"
+        },
+        "level": {
           "type": "keyword"
         },
         "forecasts": {

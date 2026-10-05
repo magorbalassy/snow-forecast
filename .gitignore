@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+venv*/
+
+# Generated at runtime
+snow_forecast.log
+sample.json
+snow_forecast_resorts.ndjson
+user_resorts.json
+
+# Old copies / scratch
+*.old
+*.py.1

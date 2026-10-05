@@ -1,8 +1,11 @@
 {
   "$schema": "https://vega.github.io/schema/vega/v5.json",
-
-  "padding": {"top": 50, "left": 50, "right": 30, "bottom": 30},
-
+  "padding": {
+    "top": 50,
+    "left": 50,
+    "right": 30,
+    "bottom": 30
+  },
   "data": [
     {
       "name": "rawData",
@@ -10,33 +13,98 @@
         "index": "snow-forecast",
         "body": {
           "size": 1000,
-          "_source": ["name", "forecasts"],
+          "sort": [
+            {
+              "@timestamp": "desc"
+            }
+          ],
+          "_source": [
+            "@timestamp",
+            "name",
+            "level",
+            "total_snow_cm",
+            "forecasts"
+          ],
           "query": {
-            "bool":{
+            "bool": {
               "must": [
                 "%dashboard_context-must_clause%",
-                 {
+                {
                   "range": {
                     "@timestamp": {
                       "%timefilter%": true
-                      }
                     }
                   }
-        ]
+                }
+              ],
+              "filter": [
+                "%dashboard_context-filter_clause%"
+              ],
+              "must_not": [
+                "%dashboard_context-must_not_clause%"
+              ]
             }
           }
         }
       },
-      "format": {"property": "hits.hits"}
+      "format": {
+        "property": "hits.hits"
+      }
     },
     {
-      "name": "source",
+      "name": "latestData",
       "source": "rawData",
       "transform": [
         {
+          "type": "formula",
+          "expr": "datum._source.name",
+          "as": "doc_name"
+        },
+        {
+          "type": "formula",
+          "expr": "datum._source.level",
+          "as": "doc_level"
+        },
+        {
+          "type": "formula",
+          "expr": "datum._source['@timestamp']",
+          "as": "doc_timestamp"
+        },
+        {
+          "type": "window",
+          "groupby": [
+            "doc_name",
+            "doc_level"
+          ],
+          "sort": {
+            "field": "doc_timestamp",
+            "order": "descending"
+          },
+          "ops": [
+            "row_number"
+          ],
+          "as": [
+            "run_rank"
+          ]
+        },
+        {
+          "type": "filter",
+          "expr": "datum.run_rank === 1"
+        }
+      ]
+    },
+    {
+      "name": "source",
+      "source": "latestData",
+      "transform": [
+        {
           "type": "flatten",
-          "fields": ["_source.forecasts"],
-          "as": ["forecast"]
+          "fields": [
+            "_source.forecasts"
+          ],
+          "as": [
+            "forecast"
+          ]
         },
         {
           "type": "formula",
@@ -61,7 +129,9 @@
       "transform": [
         {
           "type": "aggregate",
-          "groupby": ["resort_name"]
+          "groupby": [
+            "resort_name"
+          ]
         }
       ]
     },
@@ -71,11 +141,36 @@
       "transform": [
         {
           "type": "aggregate",
-          "groupby": ["datetime"]
+          "groupby": [
+            "datetime"
+          ]
         },
         {
           "type": "collect",
-          "sort": {"field": "datetime"}
+          "sort": {
+            "field": "datetime"
+          }
+        }
+      ]
+    },
+    {
+      "name": "totals",
+      "source": "latestData",
+      "transform": [
+        {
+          "type": "formula",
+          "expr": "datum._source.name",
+          "as": "resort_name"
+        },
+        {
+          "type": "formula",
+          "expr": "'Total'",
+          "as": "datetime"
+        },
+        {
+          "type": "formula",
+          "expr": "datum._source.total_snow_cm",
+          "as": "total"
         }
       ]
     }
@@ -97,8 +192,16 @@
       "type": "band",
       "range": "width",
       "domain": {
-        "data": "unique_datetimes",
-        "field": "datetime",
+        "fields": [
+          {
+            "data": "unique_datetimes",
+            "field": "datetime"
+          },
+          {
+            "data": "totals",
+            "field": "datetime"
+          }
+        ],
         "sort": true
       },
       "padding": 0.1
@@ -106,9 +209,29 @@
     {
       "name": "color",
       "type": "linear",
-      "domain": [0, 50],
-      "range": ["#eef6ff", "#1f77b4"],
+      "domain": [
+        0,
+        50
+      ],
+      "range": [
+        "#eef6ff",
+        "#1f77b4"
+      ],
       "zero": true
+    },
+    {
+      "name": "color_total",
+      "type": "linear",
+      "domain": [
+        0,
+        100
+      ],
+      "range": [
+        "#eef6ff",
+        "#08306b"
+      ],
+      "zero": true,
+      "clamp": true
     }
   ],
   "axes": [
@@ -128,7 +251,9 @@
       "encode": {
         "labels": {
           "update": {
-            "text": {"signal": "datum.value"}
+            "text": {
+              "signal": "datum.value"
+            }
           }
         }
       }
@@ -137,34 +262,150 @@
   "marks": [
     {
       "type": "rect",
-      "from": {"data": "source"},
+      "from": {
+        "data": "source"
+      },
       "encode": {
         "enter": {
-          "y": {"scale": "y", "field": "resort_name"},
-          "height": {"scale": "y", "band": 1},
-          "x": {"scale": "x", "field": "datetime"},
-          "width": {"scale": "x", "band": 1},
+          "y": {
+            "scale": "y",
+            "field": "resort_name"
+          },
+          "height": {
+            "scale": "y",
+            "band": 1
+          },
+          "x": {
+            "scale": "x",
+            "field": "datetime"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
           "tooltip": {
-            "signal": "{'Resort': datum.resort_name, 'DateTime': datum.datetime, 'Snow': datum.forecast.snow, 'Freezing Level': datum.forecast.freezing_level + 'm', 'Humidity': datum.forecast.humidity + '%', 'Wind': datum.forecast.wind}"
+            "signal": "{'Resort': datum.resort_name, 'Level': datum._source.level, 'DateTime': datum.datetime, 'Snow': datum.forecast.snow, 'Freezing Level': datum.forecast.freezing_level + 'm', 'Humidity': datum.forecast.humidity + '%', 'Wind': datum.forecast.wind}"
           }
         },
         "update": {
-          "fill": {"scale": "color", "field": "snow_value"}
+          "fill": {
+            "scale": "color",
+            "field": "snow_value"
+          }
         }
       }
     },
     {
       "type": "text",
-      "from": {"data": "source"},
+      "from": {
+        "data": "source"
+      },
       "encode": {
         "enter": {
-          "y": {"scale": "y", "field": "resort_name", "band": 0.5},
-          "x": {"scale": "x", "field": "datetime", "band": 0.5},
-          "align": {"value": "center"},
-          "baseline": {"value": "middle"},
-          "fontSize": {"value": 11},
-          "text": {"field": "forecast.snow"},
-          "fill": {"value": "black"}
+          "y": {
+            "scale": "y",
+            "field": "resort_name",
+            "band": 0.5
+          },
+          "x": {
+            "scale": "x",
+            "field": "datetime",
+            "band": 0.5
+          },
+          "align": {
+            "value": "center"
+          },
+          "baseline": {
+            "value": "middle"
+          },
+          "fontSize": {
+            "value": 11
+          },
+          "text": {
+            "field": "forecast.snow"
+          },
+          "fill": {
+            "value": "black"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {
+        "data": "totals"
+      },
+      "encode": {
+        "enter": {
+          "y": {
+            "scale": "y",
+            "field": "resort_name"
+          },
+          "height": {
+            "scale": "y",
+            "band": 1
+          },
+          "x": {
+            "scale": "x",
+            "field": "datetime"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "stroke": {
+            "value": "#08306b"
+          },
+          "strokeWidth": {
+            "value": 1
+          },
+          "tooltip": {
+            "signal": "{'Resort': datum.resort_name, 'Level': datum._source.level, 'Total snow': datum.total + ' cm'}"
+          }
+        },
+        "update": {
+          "fill": {
+            "scale": "color_total",
+            "field": "total"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {
+        "data": "totals"
+      },
+      "encode": {
+        "enter": {
+          "y": {
+            "scale": "y",
+            "field": "resort_name",
+            "band": 0.5
+          },
+          "x": {
+            "scale": "x",
+            "field": "datetime",
+            "band": 0.5
+          },
+          "align": {
+            "value": "center"
+          },
+          "baseline": {
+            "value": "middle"
+          },
+          "fontSize": {
+            "value": 11
+          },
+          "fontWeight": {
+            "value": "bold"
+          },
+          "text": {
+            "signal": "format(datum.total, '.0f')"
+          },
+          "fill": {
+            "signal": "datum.total > 60 ? 'white' : 'black'"
+          }
         }
       }
     }
