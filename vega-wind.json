@@ -1,0 +1,433 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v5.json",
+  "padding": {
+    "top": 50,
+    "left": 50,
+    "right": 30,
+    "bottom": 30
+  },
+  "data": [
+    {
+      "name": "rawData",
+      "url": {
+        "index": "snow-forecast",
+        "body": {
+          "size": 1000,
+          "sort": [
+            {
+              "@timestamp": "desc"
+            }
+          ],
+          "_source": [
+            "@timestamp",
+            "name",
+            "level",
+            "forecasts"
+          ],
+          "query": {
+            "bool": {
+              "must": [
+                "%dashboard_context-must_clause%",
+                {
+                  "range": {
+                    "@timestamp": {
+                      "%timefilter%": true
+                    }
+                  }
+                }
+              ],
+              "filter": [
+                "%dashboard_context-filter_clause%"
+              ],
+              "must_not": [
+                "%dashboard_context-must_not_clause%"
+              ]
+            }
+          }
+        }
+      },
+      "format": {
+        "property": "hits.hits"
+      }
+    },
+    {
+      "name": "latestData",
+      "source": "rawData",
+      "transform": [
+        {
+          "type": "formula",
+          "expr": "datum._source.name",
+          "as": "doc_name"
+        },
+        {
+          "type": "formula",
+          "expr": "datum._source.level",
+          "as": "doc_level"
+        },
+        {
+          "type": "formula",
+          "expr": "datum._source['@timestamp']",
+          "as": "doc_timestamp"
+        },
+        {
+          "type": "window",
+          "groupby": [
+            "doc_name",
+            "doc_level"
+          ],
+          "sort": {
+            "field": "doc_timestamp",
+            "order": "descending"
+          },
+          "ops": [
+            "row_number"
+          ],
+          "as": [
+            "run_rank"
+          ]
+        },
+        {
+          "type": "filter",
+          "expr": "datum.run_rank === 1"
+        }
+      ]
+    },
+    {
+      "name": "source",
+      "source": "latestData",
+      "transform": [
+        {
+          "type": "flatten",
+          "fields": [
+            "_source.forecasts"
+          ],
+          "as": [
+            "forecast"
+          ]
+        },
+        {
+          "type": "formula",
+          "expr": "datum._source.name",
+          "as": "resort_name"
+        },
+        {
+          "type": "formula",
+          "expr": "datum.forecast.date + ' ' + datum.forecast.time",
+          "as": "datetime"
+        },
+        {
+          "type": "formula",
+          "expr": "datum.forecast.wind_speed",
+          "as": "wind_value"
+        },
+        {
+          "type": "formula",
+          "expr": "datum.forecast.wind_dir || ''",
+          "as": "wind_dir"
+        }
+      ]
+    },
+    {
+      "name": "unique_resorts",
+      "source": "source",
+      "transform": [
+        {
+          "type": "aggregate",
+          "groupby": [
+            "resort_name"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "unique_datetimes",
+      "source": "source",
+      "transform": [
+        {
+          "type": "aggregate",
+          "groupby": [
+            "datetime"
+          ]
+        },
+        {
+          "type": "collect",
+          "sort": {
+            "field": "datetime"
+          }
+        }
+      ]
+    },
+    {
+      "name": "totals",
+      "source": "source",
+      "transform": [
+        {
+          "type": "aggregate",
+          "groupby": [
+            "resort_name"
+          ],
+          "fields": [
+            "wind_value"
+          ],
+          "ops": [
+            "max"
+          ],
+          "as": [
+            "max_wind"
+          ]
+        },
+        {
+          "type": "formula",
+          "expr": "'Max'",
+          "as": "datetime"
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "y",
+      "type": "band",
+      "range": "height",
+      "domain": {
+        "data": "unique_resorts",
+        "field": "resort_name",
+        "sort": true
+      },
+      "padding": 0.2
+    },
+    {
+      "name": "x",
+      "type": "band",
+      "range": "width",
+      "domain": {
+        "fields": [
+          {
+            "data": "unique_datetimes",
+            "field": "datetime"
+          },
+          {
+            "data": "totals",
+            "field": "datetime"
+          }
+        ],
+        "sort": true
+      },
+      "padding": 0.1
+    },
+    {
+      "name": "risk",
+      "type": "threshold",
+      "domain": [
+        30,
+        45
+      ],
+      "range": [
+        "#e3f4e1",
+        "#fde9a9",
+        "#f6b3ad"
+      ]
+    },
+    {
+      "name": "risk_legend",
+      "type": "ordinal",
+      "domain": [
+        "< 30 calm",
+        "30-45 lift risk",
+        "> 45 likely closures"
+      ],
+      "range": [
+        "#2e7d32",
+        "#f9a825",
+        "#c62828"
+      ]
+    }
+  ],
+  "axes": [
+    {
+      "orient": "left",
+      "scale": "y",
+      "title": "Resorts",
+      "labelLimit": 140,
+      "labelFontSize": 11
+    },
+    {
+      "orient": "top",
+      "scale": "x",
+      "title": "Forecast Time (wind km/h)",
+      "labelAngle": -45,
+      "labelAlign": "left",
+      "encode": {
+        "labels": {
+          "update": {
+            "text": {
+              "signal": "datum.value"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "source"
+      },
+      "encode": {
+        "enter": {
+          "y": {
+            "scale": "y",
+            "field": "resort_name"
+          },
+          "height": {
+            "scale": "y",
+            "band": 1
+          },
+          "x": {
+            "scale": "x",
+            "field": "datetime"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "tooltip": {
+            "signal": "{'Resort': datum.resort_name, 'Level': datum._source.level, 'DateTime': datum.datetime, 'Wind': datum.wind_value + ' km/h ' + datum.wind_dir}"
+          }
+        },
+        "update": {
+          "fill": {
+            "scale": "risk",
+            "field": "wind_value"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {
+        "data": "source"
+      },
+      "encode": {
+        "enter": {
+          "y": {
+            "scale": "y",
+            "field": "resort_name",
+            "band": 0.5
+          },
+          "x": {
+            "scale": "x",
+            "field": "datetime",
+            "band": 0.5
+          },
+          "align": {
+            "value": "center"
+          },
+          "baseline": {
+            "value": "middle"
+          },
+          "fontSize": {
+            "value": 10
+          },
+          "text": {
+            "signal": "datum.wind_value == null ? '' : datum.wind_value + ' ' + datum.wind_dir"
+          },
+          "fill": {
+            "value": "black"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {
+        "data": "totals"
+      },
+      "encode": {
+        "enter": {
+          "y": {
+            "scale": "y",
+            "field": "resort_name"
+          },
+          "height": {
+            "scale": "y",
+            "band": 1
+          },
+          "x": {
+            "scale": "x",
+            "field": "datetime"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "stroke": {
+            "value": "#555555"
+          },
+          "strokeWidth": {
+            "value": 1
+          },
+          "tooltip": {
+            "signal": "{'Resort': datum.resort_name, 'Max wind': datum.max_wind + ' km/h'}"
+          }
+        },
+        "update": {
+          "fill": {
+            "scale": "risk",
+            "field": "max_wind"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {
+        "data": "totals"
+      },
+      "encode": {
+        "enter": {
+          "y": {
+            "scale": "y",
+            "field": "resort_name",
+            "band": 0.5
+          },
+          "x": {
+            "scale": "x",
+            "field": "datetime",
+            "band": 0.5
+          },
+          "align": {
+            "value": "center"
+          },
+          "baseline": {
+            "value": "middle"
+          },
+          "fontSize": {
+            "value": 11
+          },
+          "fontWeight": {
+            "value": "bold"
+          },
+          "text": {
+            "signal": "datum.max_wind == null ? '' : format(datum.max_wind, '.0f')"
+          },
+          "fill": {
+            "value": "black"
+          }
+        }
+      }
+    }
+  ],
+  "legends": [
+    {
+      "fill": "risk_legend",
+      "orient": "bottom",
+      "direction": "horizontal",
+      "title": "Wind (km/h, mean; gusts are typically ~1.5x)",
+      "symbolType": "square",
+      "labelLimit": 200,
+      "titleLimit": 400
+    }
+  ]
+}

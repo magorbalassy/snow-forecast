@@ -1,6 +1,7 @@
 import datetime
 import bs4
 import logging
+import re
 import requests
 
 # Use the custom logger
@@ -109,6 +110,20 @@ class SnowForecast:
         return None
     
     @staticmethod
+    def _parse_wind(text):
+        """Split wind text like '10SSW' or '10 SSW' into (10, 'SSW'); (None, None) if not parseable."""
+        match = re.match(r'^\s*(\d+)\s*([NESW]{1,3})?\s*$', text or '')
+        if not match:
+            return None, None
+        return int(match.group(1)), match.group(2)
+
+    @staticmethod
+    def _extract_elevation(soup):
+        """Altitude of the forecast level from text like 'Weather Forecast for Zermatt at 3820 m altitude'."""
+        match = re.search(r'at\s+([\d,]+)\s*m\s+altitude', soup.get_text(' '))
+        return int(match.group(1).replace(',', '')) if match else None
+
+    @staticmethod
     def _clean_number(text, default=None):
         """Return text if it is a number, otherwise default (handles '—', '–', '-' and empty cells)."""
         text = text.strip()
@@ -146,6 +161,11 @@ class SnowForecast:
     # Wind is in a row tr class="forecast-table__row" data-row="wind"
     # Example file is example-forecast.html
     def forecast_for_resort(self, resort_url):
+        page = self.forecast_page(resort_url)
+        return page['forecasts'] if page else None
+
+    def forecast_page(self, resort_url):
+        """Return {'elevation_m': altitude of this forecast level, 'forecasts': [...]} or None."""
         full_url = f"{self.base_url}{resort_url}"
         #full_url = full_url.replace('/mid', '/top')  # Ensure we get the top forecast page
         response = requests.get(full_url, headers=self.headers)
@@ -238,6 +258,7 @@ class SnowForecast:
                 'humidity': humidity_data[i] if i < len(humidity_data) else None,
                 'wind': wind_data[i] if i < len(wind_data) else None  # Add wind to forecast
             }
+            day_forecast['wind_speed'], day_forecast['wind_dir'] = self._parse_wind(day_forecast['wind'])
             forecast_data.append(day_forecast)
 
-        return forecast_data
+        return {'elevation_m': self._extract_elevation(soup), 'forecasts': forecast_data}

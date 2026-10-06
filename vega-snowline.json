@@ -1,0 +1,421 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v5.json",
+  "description": "Per resort: ski area from bottom to top station per time slot, split at the freezing level into snow zone (above) and rain zone (below).",
+  "autosize": {
+    "type": "pad"
+  },
+  "padding": {
+    "top": 10,
+    "left": 10,
+    "right": 10,
+    "bottom": 10
+  },
+  "signals": [
+    {
+      "name": "columns",
+      "value": 6
+    },
+    {
+      "name": "rows",
+      "update": "ceil(length(data('resorts')) / columns)"
+    },
+    {
+      "name": "cellWidth",
+      "update": "max(120, (width - 60) / columns - 60)"
+    },
+    {
+      "name": "cellHeight",
+      "update": "max(50, (height - 50) / max(rows, 1) - 72)"
+    }
+  ],
+  "data": [
+    {
+      "name": "rawData",
+      "url": {
+        "index": "snow-forecast",
+        "body": {
+          "size": 1000,
+          "sort": [
+            {
+              "@timestamp": "desc"
+            }
+          ],
+          "_source": [
+            "@timestamp",
+            "name",
+            "level",
+            "elevation_m",
+            "forecasts"
+          ],
+          "query": {
+            "bool": {
+              "must": [
+                "%dashboard_context-must_clause%",
+                {
+                  "range": {
+                    "@timestamp": {
+                      "%timefilter%": true
+                    }
+                  }
+                },
+                {
+                  "exists": {
+                    "field": "elevation_m"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "format": {
+        "property": "hits.hits"
+      }
+    },
+    {
+      "name": "latestData",
+      "source": "rawData",
+      "transform": [
+        {
+          "type": "formula",
+          "expr": "datum._source.name",
+          "as": "resort_name"
+        },
+        {
+          "type": "formula",
+          "expr": "datum._source.level",
+          "as": "doc_level"
+        },
+        {
+          "type": "formula",
+          "expr": "datum._source['@timestamp']",
+          "as": "doc_timestamp"
+        },
+        {
+          "type": "formula",
+          "expr": "datum._source.elevation_m",
+          "as": "elevation"
+        },
+        {
+          "type": "window",
+          "groupby": [
+            "resort_name",
+            "doc_level"
+          ],
+          "sort": {
+            "field": "doc_timestamp",
+            "order": "descending"
+          },
+          "ops": [
+            "row_number"
+          ],
+          "as": [
+            "run_rank"
+          ]
+        },
+        {
+          "type": "filter",
+          "expr": "datum.run_rank === 1"
+        }
+      ]
+    },
+    {
+      "name": "elevations",
+      "source": "latestData",
+      "transform": [
+        {
+          "type": "aggregate",
+          "groupby": [
+            "resort_name"
+          ],
+          "fields": [
+            "elevation",
+            "elevation"
+          ],
+          "ops": [
+            "min",
+            "max"
+          ],
+          "as": [
+            "base",
+            "top"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "slots",
+      "source": "latestData",
+      "transform": [
+        {
+          "type": "filter",
+          "expr": "datum.doc_level === 'mid'"
+        },
+        {
+          "type": "flatten",
+          "fields": [
+            "_source.forecasts"
+          ],
+          "as": [
+            "forecast"
+          ]
+        },
+        {
+          "type": "formula",
+          "expr": "datum.forecast.date + ' ' + datum.forecast.time",
+          "as": "datetime"
+        },
+        {
+          "type": "formula",
+          "expr": "toNumber(datum.forecast.freezing_level)",
+          "as": "fl"
+        },
+        {
+          "type": "filter",
+          "expr": "isValid(datum.fl)"
+        },
+        {
+          "type": "lookup",
+          "from": "elevations",
+          "key": "resort_name",
+          "fields": [
+            "resort_name"
+          ],
+          "values": [
+            "base",
+            "top"
+          ]
+        },
+        {
+          "type": "formula",
+          "expr": "clamp(datum.fl, datum.base, datum.top)",
+          "as": "split"
+        }
+      ]
+    },
+    {
+      "name": "resorts",
+      "source": "slots",
+      "transform": [
+        {
+          "type": "aggregate",
+          "groupby": [
+            "resort_name"
+          ]
+        },
+        {
+          "type": "collect",
+          "sort": {
+            "field": "resort_name"
+          }
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "range": [
+        0,
+        {
+          "signal": "cellWidth"
+        }
+      ],
+      "domain": {
+        "data": "slots",
+        "field": "datetime",
+        "sort": true
+      },
+      "padding": 0.1
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "range": [
+        {
+          "signal": "cellHeight"
+        },
+        0
+      ],
+      "domain": {
+        "fields": [
+          {
+            "data": "slots",
+            "field": "base"
+          },
+          {
+            "data": "slots",
+            "field": "top"
+          },
+          {
+            "data": "slots",
+            "field": "fl"
+          }
+        ]
+      },
+      "zero": false,
+      "nice": true
+    }
+  ],
+  "layout": {
+    "columns": {
+      "signal": "columns"
+    },
+    "padding": {
+      "row": 30,
+      "column": 20
+    },
+    "bounds": "full"
+  },
+  "marks": [
+    {
+      "type": "group",
+      "from": {
+        "facet": {
+          "name": "resortSlots",
+          "data": "slots",
+          "groupby": "resort_name"
+        }
+      },
+      "sort": {
+        "field": "datum.resort_name"
+      },
+      "title": {
+        "text": {
+          "signal": "parent.resort_name"
+        },
+        "fontSize": 12,
+        "offset": 4
+      },
+      "encode": {
+        "update": {
+          "width": {
+            "signal": "cellWidth"
+          },
+          "height": {
+            "signal": "cellHeight"
+          },
+          "stroke": {
+            "value": "#dddddd"
+          }
+        }
+      },
+      "axes": [
+        {
+          "orient": "left",
+          "scale": "y",
+          "tickCount": 3,
+          "labelFontSize": 9,
+          "format": "d"
+        },
+        {
+          "orient": "bottom",
+          "scale": "x",
+          "labelFontSize": 9,
+          "labelAngle": 0,
+          "encode": {
+            "labels": {
+              "update": {
+                "text": {
+                  "signal": "indexof(datum.value, ' AM') > 0 ? slice(datum.value, 8, 10) : ''"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "marks": [
+        {
+          "type": "rect",
+          "from": {
+            "data": "resortSlots"
+          },
+          "encode": {
+            "update": {
+              "x": {
+                "scale": "x",
+                "field": "datetime"
+              },
+              "width": {
+                "scale": "x",
+                "band": 1
+              },
+              "y": {
+                "scale": "y",
+                "field": "split"
+              },
+              "y2": {
+                "scale": "y",
+                "field": "base"
+              },
+              "fill": {
+                "value": "#fdae6b"
+              },
+              "tooltip": {
+                "signal": "{'Resort': datum.resort_name, 'Time': datum.datetime, 'Freezing level': datum.fl + ' m', 'Bottom': datum.base + ' m', 'Top': datum.top + ' m'}"
+              }
+            }
+          }
+        },
+        {
+          "type": "rect",
+          "from": {
+            "data": "resortSlots"
+          },
+          "encode": {
+            "update": {
+              "x": {
+                "scale": "x",
+                "field": "datetime"
+              },
+              "width": {
+                "scale": "x",
+                "band": 1
+              },
+              "y": {
+                "scale": "y",
+                "field": "top"
+              },
+              "y2": {
+                "scale": "y",
+                "field": "split"
+              },
+              "fill": {
+                "value": "#6baed6"
+              },
+              "tooltip": {
+                "signal": "{'Resort': datum.resort_name, 'Time': datum.datetime, 'Freezing level': datum.fl + ' m', 'Bottom': datum.base + ' m', 'Top': datum.top + ' m'}"
+              }
+            }
+          }
+        },
+        {
+          "type": "line",
+          "from": {
+            "data": "resortSlots"
+          },
+          "encode": {
+            "update": {
+              "x": {
+                "scale": "x",
+                "field": "datetime",
+                "band": 0.5
+              },
+              "y": {
+                "scale": "y",
+                "field": "fl"
+              },
+              "stroke": {
+                "value": "#b30000"
+              },
+              "strokeWidth": {
+                "value": 2
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

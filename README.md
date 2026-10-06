@@ -98,7 +98,7 @@ PUT snow-forecasts/_settings
 
 # Kibana dashboard
 
-`kibana-dashboard.ndjson` contains the dashboard with the map, the Vega table, the Level control and the data view.
+`kibana-dashboard.ndjson` contains the dashboard and everything it uses: snow map, snow table (`vega.json`), lift wind risk map, wind table (`vega-wind.json`), snow line chart (`vega-snowline.json`), the Level control and the data view. The `vega-*.json` files are readable copies of the specs inside the ndjson.
 
 Upload (overwrites existing objects):
 ```

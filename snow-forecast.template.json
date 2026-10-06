@@ -16,6 +16,13 @@
             "source": "emit(doc['name'].value + '\n' + doc['total_snow_cm'].value + ' cm')",
             "lang": "painless"
           }
+        },
+        "wind_label": {
+          "type": "keyword",
+          "script": {
+            "lang": "painless",
+            "source": "if (doc['max_wind_kmh_48h'].size() == 0) { emit(doc['name'].value); } else { emit(doc['name'].value + '\n' + doc['max_wind_kmh_48h'].value + ' km/h'); }"
+          }
         }
       },
       "dynamic_templates": [],
@@ -66,8 +73,20 @@
                   "type": "keyword"
                 }
               }
+            },
+            "wind_speed": {
+              "type": "integer"
+            },
+            "wind_dir": {
+              "type": "keyword"
             }
           }
+        },
+        "elevation_m": {
+          "type": "integer"
+        },
+        "max_wind_kmh_48h": {
+          "type": "integer"
         }
       }
     }

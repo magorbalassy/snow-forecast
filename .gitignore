@@ -11,3 +11,6 @@ user_resorts.json
 # Old copies / scratch
 *.old
 *.py.1
+
+# Local secrets
+.env

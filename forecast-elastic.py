@@ -42,6 +42,8 @@ class SnowForecastDocument:
     country: str
     geo: Dict[str, float]
     level: str  # Mountain level of the forecast: top, mid or bot
+    elevation_m: Optional[int]  # Altitude of this level
+    max_wind_kmh_48h: Optional[int]  # Strongest wind in the first 48 hours (6 time slots)
     forecasts: List[Dict[str, str]]  # List of daily forecasts with date, time, snow, freezing_level, humidity, wind
     total_snow_cm: float  # Sum of all snow forecasts
     timestamp: str  # ISO8601 date when the forecast was fetched
@@ -116,7 +118,7 @@ def update_user_resorts(user_resorts: List[Resort], snow_forecast_resorts: Dict[
                 user_resort.data_url = sf_resort.data_url
                 break
 
-def create_snow_forecast_document(resort: Resort, level: str, forecast_data: List[Dict]) -> SnowForecastDocument:
+def create_snow_forecast_document(resort: Resort, level: str, elevation_m: Optional[int], forecast_data: List[Dict]) -> SnowForecastDocument:
     """Create a SnowForecastDocument from resort and its forecast data"""
     # Calculate total snow from forecast data
     total_snow = sum(
@@ -125,11 +127,16 @@ def create_snow_forecast_document(resort: Resort, level: str, forecast_data: Lis
         if point.get('snow')
     )
     
+    # 3 time slots per day (AM, PM, night), so 6 slots cover 48 hours
+    winds_48h = [point['wind_speed'] for point in forecast_data[:6] if point.get('wind_speed') is not None]
+
     return SnowForecastDocument(
         name=resort.name,
         country=resort.country,
         geo=resort.geo or {},
         level=level,
+        elevation_m=elevation_m,
+        max_wind_kmh_48h=max(winds_48h) if winds_48h else None,
         forecasts=forecast_data,
         total_snow_cm=total_snow,
         timestamp=datetime.utcnow().isoformat()
@@ -157,6 +164,17 @@ def setup_pipeline(es_client, pipeline_name='snow-forecast'):
         logger.info(f"Pipeline upload response: {response}")
     except Exception as e:
         logger.error(f"Error uploading pipeline: {str(e)}", exc_info=True)
+
+# Fields added after the first index was created; applied to existing indices on every run
+NEW_FIELD_MAPPINGS = {
+    'level': {'type': 'keyword'},
+    'elevation_m': {'type': 'integer'},
+    'max_wind_kmh_48h': {'type': 'integer'},
+    'forecasts': {'type': 'nested', 'properties': {
+        'wind_speed': {'type': 'integer'},
+        'wind_dir': {'type': 'keyword'},
+    }},
+}
 
 def setup_index(es_client, index_name='snow-forecast'):
     logger.debug(f"Loading Elasticsearch index template for {index_name}")
@@ -190,7 +208,8 @@ def setup_index(es_client, index_name='snow-forecast'):
         # Template settings and mappings only apply at index creation, so apply them to existing indices too
         try:
             es_client.indices.put_settings(index=index_name, settings={'index.default_pipeline': 'snow-forecast'})
-            es_client.indices.put_mapping(index=index_name, properties={'level': {'type': 'keyword'}})
+            es_client.indices.put_mapping(index=index_name, properties=NEW_FIELD_MAPPINGS,
+                                          runtime=template.get('template', {}).get('mappings', {}).get('runtime', {}))
         except Exception as e:
             logger.error(f"Error updating settings/mapping on {index_name}: {str(e)}")
 
@@ -206,6 +225,8 @@ def prepare_documents(elastic_documents, index_name='snow-forecast'):
                 'country': doc.country,
                 'geo': doc.geo,
                 'level': doc.level,
+                'elevation_m': doc.elevation_m,
+                'max_wind_kmh_48h': doc.max_wind_kmh_48h,
                 'total_snow_cm': doc.total_snow_cm,
                 'forecasts': doc.forecasts
             }
@@ -269,12 +290,12 @@ if __name__ == '__main__':
             level_url = f"{base_url}/{level}"
             logger.info(f"Fetching {level} forecast for {resort.name}, data URL: {level_url}")
             try:
-                forecast_data = sf.forecast_for_resort(level_url)
+                page = sf.forecast_page(level_url)
             except Exception as e:
                 logger.error(f"Failed to fetch {level} forecast for {resort.name}: {str(e)}")
                 continue
-            if forecast_data:
-                doc = create_snow_forecast_document(resort, level, forecast_data)
+            if page and page['forecasts']:
+                doc = create_snow_forecast_document(resort, level, page['elevation_m'], page['forecasts'])
                 elastic_documents.append(doc)
                 logger.info(f"Successfully created {level} document for {resort.name}")
             else:
